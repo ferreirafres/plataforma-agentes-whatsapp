@@ -1,0 +1,91 @@
+name: plataforma-agentes-whatsapp
+
+x-agentes-env: &agentes-env
+  DATA_DIR: /data
+  COOKIE_SECURE: ${COOKIE_SECURE:-0}
+  AGENTES_PROXY_HOPS: ${AGENTES_PROXY_HOPS:-0}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+
+services:
+  agentes:
+    build: ./agentes
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *agentes-env
+      MCP_BOOTSTRAP_FILE: /bootstrap/mcp.json
+      MCP_TRANSPORT_URL: http://whatsapp-mcp:3000
+    ports:
+      - "127.0.0.1:${AGENTES_PORT:-8820}:8000"
+    volumes:
+      - agentes-data:/data
+      - mcp-bootstrap:/bootstrap:ro
+    depends_on:
+      whatsapp-mcp:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+
+  worker:
+    build: ./agentes
+    command: [python, worker.py]
+    restart: unless-stopped
+    init: true
+    environment: *agentes-env
+    volumes:
+      - agentes-data:/data
+    depends_on:
+      agentes:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import sqlite3,time; row=sqlite3.connect('/data/agents.sqlite3').execute(\"SELECT value FROM settings WHERE key='worker_heartbeat'\").fetchone(); assert row and time.time()-float(row[0])<90"]
+      interval: 10s
+      timeout: 4s
+      retries: 9
+
+  whatsapp-mcp:
+    build: ./whatsapp-mcp
+    restart: unless-stopped
+    init: true
+    environment:
+      MCP_DATA_DIR: /data
+      PLATFORM_BOOTSTRAP_DIR: /bootstrap
+      INSTANCE_NAME: whatsapp
+      INSTANCE_DISPLAY_NAME: ${WHATSAPP_NAME:-Meu WhatsApp}
+      WHATSAPP_MCP_VERSION: "1.9.1"
+      PUBLIC_URL: ${MCP_PUBLIC_URL:-http://127.0.0.1:${MCP_PORT:-3000}}
+      MCP_PROXY_HOPS: ${MCP_PROXY_HOPS:-0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      DRIVE_TOKEN_ENCRYPTION_KEY: ${DRIVE_TOKEN_ENCRYPTION_KEY:-}
+      PRIVACY_CONTACT_EMAIL: ${PRIVACY_CONTACT_EMAIL:-}
+    ports:
+      - "127.0.0.1:${MCP_PORT:-3000}:3000"
+    volumes:
+      - whatsapp-data:/data
+      - mcp-bootstrap:/bootstrap
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+
+volumes:
+  agentes-data:
+  whatsapp-data:
+  mcp-bootstrap:

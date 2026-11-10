@@ -1,0 +1,5 @@
+*
+!requirements.txt
+!*.py
+!static/
+!static/**
